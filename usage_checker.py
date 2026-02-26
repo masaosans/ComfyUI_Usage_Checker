@@ -31,12 +31,18 @@ class ComfyUIUsageChecker:
     # Main
     # ==========================================
     def run(self, workflows_dir):
-
-        workflows_dir = os.path.abspath(workflows_dir)
-
+    
+        base = folder_paths.base_path
+    
+        # 相対パスなら ComfyUI ルート基準にする
+        if not os.path.isabs(workflows_dir):
+            workflows_dir = os.path.join(base, workflows_dir)
+    
+        workflows_dir = os.path.normpath(workflows_dir)
+    
         if not os.path.exists(workflows_dir):
             return (f"Workflow dir not found: {workflows_dir}",)
-
+    
         used_models = set()
         used_node_types = set()
 
