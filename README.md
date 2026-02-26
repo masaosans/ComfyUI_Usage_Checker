@@ -29,3 +29,32 @@ ComfyUI/custom_nodes/ComfyUI_usage_checker/
 1. ノード追加
 2. utils → ComfyUI Global Usage Checker
 3. workflows ディレクトリを指定
+
+---
+
+## 判定ロジックについて
+
+### Model
+拡張子ベースで検出:
+
+- .safetensors
+- .ckpt
+- .pt
+- .bin
+- .pth
+- .onnx
+- .gguf
+
+### Custom Nodes
+- custom_nodes 配下のフォルダ単位で判定
+- .py を含むディレクトリをノードとして扱う
+
+---
+
+## ** 注意 ** 
+
+- ノードタイプ名とフォルダ名が一致しない場合は誤検出の可能性があります
+- モデルが UI 表示名とファイル名で違う場合も誤差が出る可能性があります
+
+
+MIT
