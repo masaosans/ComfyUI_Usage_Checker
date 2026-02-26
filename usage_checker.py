@@ -59,25 +59,37 @@ class ComfyUIUsageChecker:
         all_custom_nodes = self.scan_all_custom_nodes()
 
         # 4. Compare
+        # ==========================================
+        # Custom Node Matching (改良版)
+        # ==========================================
+        
+        # ---- Models ----
         unused_models = {
             name: path for name, path in all_models.items()
             if name not in used_models
         }
-
+        
         used_models_with_path = {
             name: path for name, path in all_models.items()
             if name in used_models
         }
-
-        unused_nodes = {
-            name: path for name, path in all_custom_nodes.items()
-            if name not in used_node_types
-        }
-
-        used_nodes_with_path = {
-            name: path for name, path in all_custom_nodes.items()
-            if name in used_node_types
-        }
+        
+        # ---- Custom Nodes ----
+        used_nodes_with_path = {}
+        unused_nodes = {}
+        
+        # 1. workflowで使用されているノードは必ず表示
+        for node_type in used_node_types:
+            if node_type in all_custom_nodes:
+                used_nodes_with_path[node_type] = all_custom_nodes[node_type]
+            else:
+                # パス不明でも表示
+                used_nodes_with_path[node_type] = ""
+        
+        # 2. custom_nodesフォルダにあるが使われていないもの
+        for folder_name, path in all_custom_nodes.items():
+            if folder_name not in used_node_types:
+                unused_nodes[folder_name] = path
 
         # 5. Report
         report = []
