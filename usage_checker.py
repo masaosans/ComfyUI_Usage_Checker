@@ -18,7 +18,7 @@ class ComfyUIUsageChecker:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "workflows_dir": ("STRING", {"default": "workflows"}),
+                "workflows_dir": ("STRING", {"default": "user/default/workflows"}),
             }
         }
 
@@ -91,21 +91,39 @@ class ComfyUIUsageChecker:
     # Scan workflow JSON
     # ==========================================
     def scan_workflow(self, path, used_models, used_node_types):
-
+    
         try:
             with open(path, "r", encoding="utf-8") as f:
                 wf = json.load(f)
         except:
             return
-
-        nodes = wf.get("nodes", {})
-
-        for _, node in nodes.items():
-
+    
+        nodes = wf.get("nodes", [])
+    
+        # -----------------------------
+        # nodes が dict の場合（旧）
+        # -----------------------------
+        if isinstance(nodes, dict):
+            iterable = nodes.values()
+    
+        # -----------------------------
+        # nodes が list の場合（現行）
+        # -----------------------------
+        elif isinstance(nodes, list):
+            iterable = nodes
+    
+        else:
+            return
+    
+        for node in iterable:
+    
+            if not isinstance(node, dict):
+                continue
+    
             node_type = node.get("type")
             if node_type:
                 used_node_types.add(node_type)
-
+    
             self.extract_models(node, used_models)
 
     # ==========================================
