@@ -1,9 +1,9 @@
-from .usage_checker import ComfyUIUsageChecker
+from .usage_checker import UsageCheckerNode
 
 NODE_CLASS_MAPPINGS = {
-    "ComfyUIUsageChecker": ComfyUIUsageChecker
+    "ComfyUIUsageChecker": UsageCheckerNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ComfyUIUsageChecker": "ComfyUI Global Usage Checker"
+    "ComfyUIUsageChecker": "check usage model and node"
 }
