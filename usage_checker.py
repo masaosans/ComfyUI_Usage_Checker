@@ -58,7 +58,7 @@ class UsageCheckerNode:
         unused_models = set(all_models.keys()) - used_model_files
 
         report = []
-        report.append("===== ULTRA USAGE REPORT =====\n")
+        report.append("===== USAGE REPORT =====\n")
 
         report.append("---- Used Custom Nodes ----")
         for nt in sorted(used_node_types):
