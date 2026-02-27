@@ -88,15 +88,15 @@ class UsageCheckerNode:
     # =====================================================
 
     def scan_workflow(self, path, used_node_types, used_model_files, dependency_graph):
-
+    
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except:
             return
-
+    
         nodes = []
-
+    
         if isinstance(data, dict):
             if isinstance(data.get("nodes"), dict):
                 nodes = data["nodes"].values()
@@ -104,43 +104,59 @@ class UsageCheckerNode:
                 nodes = data["nodes"]
         elif isinstance(data, list):
             nodes = data
-
+    
         model_input_map = self.build_dynamic_model_input_map()
-
+    
         for node in nodes:
-
+    
             node_type = node.get("type")
             if not node_type:
                 continue
-
+    
             used_node_types.add(node_type)
-
-            inputs = node.get("inputs", {})
-
+    
+            raw_inputs = node.get("inputs", {})
+    
+            # inputs 正規化
+            if isinstance(raw_inputs, dict):
+                inputs = raw_inputs
+    
+            elif isinstance(raw_inputs, list):
+                inputs = {}
+                for item in raw_inputs:
+                    if isinstance(item, dict):
+                        name = item.get("name")
+                        value = item.get("value")
+                        if name:
+                            inputs[name] = value
+            else:
+                inputs = {}
+    
             if node_type not in dependency_graph:
                 dependency_graph[node_type] = []
-
-            # ① 動的解析
+    
+            # 動的モデル検出
             if node_type in model_input_map:
                 for key in model_input_map[node_type]:
                     val = inputs.get(key)
                     if isinstance(val, str):
                         used_model_files.add(val)
                         dependency_graph[node_type].append(val)
-
-            # ② Embedding解析
+    
+            # Embedding検出
             for v in inputs.values():
                 if isinstance(v, str):
                     embeddings = self.extract_embeddings(v)
                     for emb in embeddings:
                         used_model_files.add(emb)
                         dependency_graph[node_type].append(emb)
-
-            # ③ フォールバック
+    
+            # フォールバック拡張子検出
             for v in inputs.values():
                 if isinstance(v, str) and self.is_model_filename(v):
                     used_model_files.add(v)
                     dependency_graph[node_type].append(v)
+
 
     # =====================================================
     # Embedding抽出
