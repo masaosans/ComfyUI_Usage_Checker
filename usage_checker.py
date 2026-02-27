@@ -1,199 +1,280 @@
 import os
 import json
+import re
 import folder_paths
+from nodes import NODE_CLASS_MAPPINGS
 
-MODEL_EXTENSIONS = (
-    ".safetensors",
-    ".ckpt",
-    ".pt",
-    ".bin",
-    ".pth",
-    ".onnx",
-    ".gguf",
-)
 
-class ComfyUIUsageChecker:
+class UsageCheckerNode:
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "workflows_dir": ("STRING", {"default": "user/default/workflows"}),
+                "workflow_dir": ("STRING", {"default": "user/default/workflows"}),
             }
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("report",)
     FUNCTION = "run"
     CATEGORY = "utils"
 
-    # ==========================================
-    # Main
-    # ==========================================
-    def run(self, workflows_dir):
+    # =====================================================
+    # メイン処理
+    # =====================================================
 
-        base = folder_paths.base_path
+    def run(self, workflow_dir):
 
-        if not os.path.isabs(workflows_dir):
-            workflows_dir = os.path.join(base, workflows_dir)
+        workflow_dir = os.path.abspath(workflow_dir)
 
-        workflows_dir = os.path.normpath(workflows_dir)
-
-        if not os.path.exists(workflows_dir):
-            return (f"Workflow dir not found: {workflows_dir}",)
-
-        used_models = set()
         used_node_types = set()
+        used_model_files = set()
+        dependency_graph = {}
 
-        # 1. Scan workflows
-        for root, _, files in os.walk(workflows_dir):
+        for root, _, files in os.walk(workflow_dir):
             for file in files:
                 if file.endswith(".json"):
-                    path = os.path.join(root, file)
-                    self.scan_workflow(path, used_models, used_node_types)
+                    self.scan_workflow(
+                        os.path.join(root, file),
+                        used_node_types,
+                        used_model_files,
+                        dependency_graph
+                    )
 
-        # 2. Scan models
-        all_models = self.scan_all_models()
+        custom_nodes_dir = folder_paths.get_folder_paths("custom_nodes")[0]
+        all_custom_nodes = self.scan_custom_nodes(custom_nodes_dir)
 
-        # 3. Scan custom_nodes
-        all_custom_nodes = self.scan_all_custom_nodes()
+        all_models = self.scan_all_model_files()
 
-        # 4. Compare
-        # ==========================================
-        # Custom Node Matching (改良版)
-        # ==========================================
-        
-        # ---- Models ----
-        unused_models = {
-            name: path for name, path in all_models.items()
-            if name not in used_models
-        }
-        
-        used_models_with_path = {
-            name: path for name, path in all_models.items()
-            if name in used_models
-        }
-        
-        # ---- Custom Nodes ----
-        used_nodes_with_path = {}
-        unused_nodes = {}
-        
-        # 1. workflowで使用されているノードは必ず表示
-        for node_type in used_node_types:
-            if node_type in all_custom_nodes:
-                used_nodes_with_path[node_type] = all_custom_nodes[node_type]
-            else:
-                # パス不明でも表示
-                used_nodes_with_path[node_type] = ""
-        
-        # 2. custom_nodesフォルダにあるが使われていないもの
-        for folder_name, path in all_custom_nodes.items():
-            if folder_name not in used_node_types:
-                unused_nodes[folder_name] = path
+        node_type_to_path = self.build_node_type_path_map(custom_nodes_dir)
 
-        # 5. Report
+        used_node_paths = set(
+            node_type_to_path.get(nt)
+            for nt in used_node_types
+            if nt in node_type_to_path
+        )
+
+        unused_nodes = all_custom_nodes - used_node_paths
+        unused_models = set(all_models.keys()) - used_model_files
+
         report = []
-        report.append("===== ComfyUI Global Usage Report =====\n")
-        report.append(f"Scanned Workflows Directory: {workflows_dir}\n")
+        report.append("===== ULTRA USAGE REPORT =====\n")
 
-        report.append("---- Used Models ----")
-        for name, path in sorted(used_models_with_path.items()):
-            report.append(f"  {name} ({path})")
-
-        report.append("\n---- Unused Models ----")
-        for name, path in sorted(unused_models.items()):
-            report.append(f"  {name} ({path})")
-
-        report.append("\n---- Used Custom Nodes ----")
-        for name, path in sorted(used_nodes_with_path.items()):
-            report.append(f"  {name} ({path})")
+        report.append("---- Used Custom Nodes ----")
+        for nt in sorted(used_node_types):
+            path = node_type_to_path.get(nt, "")
+            report.append(f"{nt} ({path})")
 
         report.append("\n---- Unused Custom Nodes ----")
-        for name, path in sorted(unused_nodes.items()):
-            report.append(f"  {name} ({path})")
+        for path in sorted(unused_nodes):
+            report.append(f"{os.path.basename(path)} ({path})")
+
+        report.append("\n---- Used Models ----")
+        for m in sorted(used_model_files):
+            report.append(f"{m} ({all_models.get(m, '')})")
+
+        report.append("\n---- Unused Models ----")
+        for m in sorted(unused_models):
+            report.append(f"{m} ({all_models.get(m, '')})")
+
+        report.append("\n---- Dependency Summary ----")
+        report.append(f"Used Nodes: {len(used_node_types)}")
+        report.append(f"Used Models: {len(used_model_files)}")
 
         return ("\n".join(report),)
 
-    # ==========================================
-    # Workflow Scan (list/dict 両対応)
-    # ==========================================
-    def scan_workflow(self, path, used_models, used_node_types):
+    # =====================================================
+    # Workflow解析
+    # =====================================================
+
+    def scan_workflow(self, path, used_node_types, used_model_files, dependency_graph):
 
         try:
             with open(path, "r", encoding="utf-8") as f:
-                wf = json.load(f)
+                data = json.load(f)
         except:
             return
 
-        nodes = wf.get("nodes", [])
+        nodes = []
 
-        if isinstance(nodes, dict):
-            iterable = nodes.values()
-        elif isinstance(nodes, list):
-            iterable = nodes
-        else:
-            return
+        if isinstance(data, dict):
+            if isinstance(data.get("nodes"), dict):
+                nodes = data["nodes"].values()
+            elif isinstance(data.get("nodes"), list):
+                nodes = data["nodes"]
+        elif isinstance(data, list):
+            nodes = data
 
-        for node in iterable:
+        model_input_map = self.build_dynamic_model_input_map()
 
-            if not isinstance(node, dict):
-                continue
+        for node in nodes:
 
             node_type = node.get("type")
-            if node_type:
-                used_node_types.add(node_type)
+            if not node_type:
+                continue
 
-            self.extract_models(node, used_models)
+            used_node_types.add(node_type)
 
-    # ==========================================
-    # Extract model references
-    # ==========================================
-    def extract_models(self, obj, used_models):
+            inputs = node.get("inputs", {})
 
-        if isinstance(obj, dict):
-            for v in obj.values():
-                self.extract_models(v, used_models)
+            if node_type not in dependency_graph:
+                dependency_graph[node_type] = []
 
-        elif isinstance(obj, list):
-            for item in obj:
-                self.extract_models(item, used_models)
+            # ① 動的解析
+            if node_type in model_input_map:
+                for key in model_input_map[node_type]:
+                    val = inputs.get(key)
+                    if isinstance(val, str):
+                        used_model_files.add(val)
+                        dependency_graph[node_type].append(val)
 
-        elif isinstance(obj, str):
-            lower = obj.lower()
-            if any(lower.endswith(ext) for ext in MODEL_EXTENSIONS):
-                used_models.add(os.path.basename(obj))
+            # ② Embedding解析
+            for v in inputs.values():
+                if isinstance(v, str):
+                    embeddings = self.extract_embeddings(v)
+                    for emb in embeddings:
+                        used_model_files.add(emb)
+                        dependency_graph[node_type].append(emb)
 
-    # ==========================================
-    # Scan models recursively
-    # ==========================================
-    def scan_all_models(self):
+            # ③ フォールバック
+            for v in inputs.values():
+                if isinstance(v, str) and self.is_model_filename(v):
+                    used_model_files.add(v)
+                    dependency_graph[node_type].append(v)
 
-        model_root = os.path.join(folder_paths.base_path, "models")
+    # =====================================================
+    # Embedding抽出
+    # =====================================================
+
+    def extract_embeddings(self, text):
+
+        results = set()
+
+        # embedding:xxx
+        matches = re.findall(r"embedding:([\w\-\_\.]+)", text)
+        for m in matches:
+            if not m.endswith(".pt"):
+                m += ".pt"
+            results.add(m)
+
+        # <embedding:xxx>
+        matches = re.findall(r"<embedding:([\w\-\_\.]+)>", text)
+        for m in matches:
+            if not m.endswith(".pt"):
+                m += ".pt"
+            results.add(m)
+
+        return results
+
+    # =====================================================
+    # 動的INPUT_TYPES解析
+    # =====================================================
+
+    def build_dynamic_model_input_map(self):
+
+        model_input_map = {}
+
+        for node_type, cls in NODE_CLASS_MAPPINGS.items():
+
+            try:
+                input_types = cls.INPUT_TYPES()
+            except:
+                continue
+
+            detected = []
+
+            for section in ["required", "optional"]:
+                section_data = input_types.get(section, {})
+
+                for input_name, input_def in section_data.items():
+
+                    if not isinstance(input_def, tuple):
+                        continue
+
+                    input_type = input_def[0]
+                    options = input_def[1] if len(input_def) > 1 else {}
+
+                    if isinstance(options, dict) and "folder" in options:
+                        detected.append(input_name)
+                        continue
+
+                    if input_type in [
+                        "MODEL",
+                        "CLIP",
+                        "VAE",
+                        "CONTROL_NET",
+                        "CONDITIONING"
+                    ]:
+                        detected.append(input_name)
+                        continue
+
+                    lowered = input_name.lower()
+                    keywords = [
+                        "ckpt", "model", "lora", "vae",
+                        "control", "clip", "unet",
+                        "encoder", "embedding"
+                    ]
+
+                    if any(k in lowered for k in keywords):
+                        detected.append(input_name)
+
+            if detected:
+                model_input_map[node_type] = detected
+
+        return model_input_map
+
+    # =====================================================
+    # モデル全取得
+    # =====================================================
+
+    def scan_all_model_files(self):
+
+        model_categories = folder_paths.folder_names_and_paths
         all_models = {}
 
-        for root, _, files in os.walk(model_root):
-            for file in files:
-                if file.lower().endswith(MODEL_EXTENSIONS):
-                    full_path = os.path.join(root, file)
-                    all_models[file] = os.path.normpath(full_path)
+        for category, paths in model_categories.items():
+            for path in paths:
+                for root, _, files in os.walk(path):
+                    for file in files:
+                        if self.is_model_filename(file):
+                            all_models[file] = os.path.join(root, file)
 
         return all_models
 
-    # ==========================================
-    # Scan custom_nodes recursively
-    # ==========================================
-    def scan_all_custom_nodes(self):
+    def is_model_filename(self, name):
+        return name.lower().endswith((
+            ".safetensors",
+            ".ckpt",
+            ".pt",
+            ".pth",
+            ".bin"
+        ))
 
-        custom_root = os.path.join(folder_paths.base_path, "custom_nodes")
-        node_folders = {}
+    # =====================================================
+    # custom_nodes解析
+    # =====================================================
 
-        for root, dirs, files in os.walk(custom_root):
+    def scan_custom_nodes(self, path):
+        result = set()
+        for root, dirs, _ in os.walk(path):
             for d in dirs:
-                full = os.path.join(root, d)
-                try:
-                    if any(f.endswith(".py") for f in os.listdir(full)):
-                        node_folders[d] = os.path.normpath(full)
-                except:
-                    pass
+                result.add(os.path.join(root, d))
+        return result
 
-        return node_folders
+    def build_node_type_path_map(self, custom_nodes_dir):
+
+        mapping = {}
+
+        for node_type, cls in NODE_CLASS_MAPPINGS.items():
+            try:
+                module = __import__(cls.__module__, fromlist=[""])
+                file_path = module.__file__
+            except:
+                continue
+
+            if file_path and custom_nodes_dir in file_path:
+                base_dir = file_path.split(custom_nodes_dir)[-1]
+                base_dir = base_dir.strip("\\/").split(os.sep)[0]
+                mapping[node_type] = os.path.join(custom_nodes_dir, base_dir)
+
+        return mapping
