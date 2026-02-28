@@ -146,13 +146,20 @@ class UsageCheckerNode:
                 if not isinstance(value, str):
                     continue
 
+                # ① まず拡張子で拾う（Resolver非依存）
+                if self.is_model_filename(value):
+                    filename = os.path.basename(value)
+                    used_model_files.add(filename)
+                    dependency_graph[node_type].append(filename)
+                
+                # ② Resolverで追加確認
                 resolved = self.resolve_model(value)
-
                 if resolved:
                     filename = os.path.basename(resolved)
                     used_model_files.add(filename)
                     dependency_graph[node_type].append(filename)
 
+                
                 for emb in self.extract_embeddings(value):
                     resolved = self.resolve_model(emb)
                     if resolved:
