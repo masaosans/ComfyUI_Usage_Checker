@@ -137,7 +137,7 @@ Removable Directories: 3
 # インストール
 
 ```
-git clone https://github.com/masaosans/ComfyUI_usage_checker.git
+git clone https://github.com/masaosans/ComfyUI_Usage_Checker.git
 ```
 
 `custom_nodes` フォルダに配置し、ComfyUIを再起動してください。
