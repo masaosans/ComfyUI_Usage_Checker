@@ -34,14 +34,17 @@ class UsageCheckerNode:
         # 🔥 全workflowスキャン
         for root, _, files in os.walk(workflow_dir):
             for file in files:
-                if file.endswith(".json"):
-                    self.scan_workflow(
-                        os.path.join(root, file),
-                        used_node_types,
-                        used_model_files,
-                        dependency_graph
-                    )
-
+                if not file.endswith(".json"):
+                    continue
+                if file.startswith("."):
+                    continue  # ← これ重要
+        
+                self.scan_workflow(
+                    os.path.join(root, file),
+                    used_node_types,
+                    used_model_files,
+                    dependency_graph
+                )
         # custom_nodes
         custom_nodes_dir = folder_paths.get_folder_paths("custom_nodes")[0]
 
@@ -106,13 +109,16 @@ class UsageCheckerNode:
 
     def scan_workflow(self, path, used_node_types, used_model_files, dependency_graph):
 
-        print(f"[DEBUG] Scanning workflow: {path}")
-        print(f"[DEBUG] Root JSON type: {type(data)}")
         
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except:
+            print(f"[DEBUG] Scanning workflow: {path}")
+            print(f"[DEBUG] Root JSON type: {type(data)}")
+
+        except Exception as e:
+            print(f"[DEBUG] Failed to load JSON: {path}")
+            print(f"[DEBUG] Reason: {e}")
             return
 
         nodes = []
