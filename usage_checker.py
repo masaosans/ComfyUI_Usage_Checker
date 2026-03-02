@@ -160,34 +160,32 @@ class UsageCheckerNode:
             
             else:
                 inputs = {}
+
+            # =============================
+            # ②  v3 widgets_values 対応（順序依存しない安全版）
+            # =============================
             
-            # =============================
-            # ② 🔥 v3 widgets_values 対応をここに追加
-            # =============================
             widgets = node.get("widgets_values")
             
             if isinstance(widgets, list):
             
-                node_cls = NODE_CLASS_MAPPINGS.get(node_type)
+                input_defs = node.get("inputs", [])
             
-                if node_cls:
-                    try:
-                        input_def = node_cls.INPUT_TYPES()
+                # widget を持つ input 定義だけ抽出
+                widget_inputs = [
+                    inp for inp in input_defs
+                    if isinstance(inp, dict) and inp.get("widget") is not None
+                ]
             
-                        ordered_keys = []
+                # workflow 上の順番に基づいてマッピング
+                for inp_def, widget_value in zip(widget_inputs, widgets):
             
-                        for section in ["required", "optional"]:
-                            section_data = input_def.get(section, {})
-                            ordered_keys.extend(section_data.keys())
+                    input_name = inp_def.get("name")
             
-                        for key, value in zip(ordered_keys, widgets):
-                            if isinstance(value, str):
-                                inputs[key] = value
+                    if isinstance(widget_value, str):
+                        inputs[input_name] = widget_value
             
-                    except Exception as e:
-                        print(f"[DEBUG] INPUT_TYPES read failed: {node_type} : {e}")
             
-
             print(f"[DEBUG] Normalized inputs: {inputs}")
 
             if node_type not in dependency_graph:
